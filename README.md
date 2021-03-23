@@ -35,7 +35,7 @@ Haberman Cancer Survival Data Set - www.kaggle.com/krpiku/haberman.csv?select=ha
 * Random Forest
 
 ### Conclusion
-By adjusting the decision threshold, I was able to obtain 100% recall using logistic regression with the mammographic and biopsy datasets -- resulting in no false negative diagnosis. The prediction accuracy using the mammography dataset was only 58.2%, which would require biopsies for many women with false positive results. However, the prediction accuracy using the biopsy dataset was 94.7%. 
+By adjusting the decision threshold, I was able to obtain 100% recall using logistic regression with the mammographic and biopsy datasets – resulting in no false negative diagnosis. The prediction accuracy using the mammography dataset was only 58.2%, which would require biopsies for many women with false positive results. However, the prediction accuracy using the biopsy dataset was 94.7%. 
 
 ### Navigation
 * Breast Cancer Analysis: Data prep, EDA, and analysis conducted in R 
