@@ -1,0 +1,561 @@
+---
+title: "Final Project 520"
+author: "Amy Femal"
+date: "8/3/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = 'C:/Users/15626/Desktop/520 Project')
+```
+##Libraries
+```{r}
+library(ggplot2)
+library(gridExtra)
+library(MASS)
+library(tidyverse) 
+library(caret)
+library(rpart) #decision trees
+library(rattle)
+library(rpart.plot)
+library(RColorBrewer)
+library(class) #knn
+library(randomForest) #random forests
+require(caTools)
+library(mlbench)
+library(e1071)
+```
+## Loading the Data
+**Mammographic Image Dataset**
+```{r}
+mam <- read.csv('mammography.csv', header=T)
+```
+**Fine Needle Aspiration Biopsy Dataset**
+```{r}
+biop <- read.csv('biopsy.csv', header=T)
+```
+**Haberman's Survival Dataset**
+```{r}
+hab <- read.csv('haberman.csv', header=T)
+```
+
+# Mammographic Image Dataset
+## Cleaning the Data
+```{r}
+str(mam)
+summary(mam)
+```
+
+We have 830 observation with six variables:
+
+BI.RADS: (Breast Imagining Reporting and Data System) Doctors use a standard system to describe mammogram findings and results. BI-RADS are sorted into categories numbered 0 through 6. 
+0 = Incomplete - Additional imagining is necessary
+1 = Negative - No abnormalities to report
+2 = Benign - No cancerous findings
+3 = Probably benign finding. Follow-up is suggested. 98% chance of being benign
+4 = Suspicious abnormality - Biopsy should be considered
+5 = Highly suggestive of malignancy - 95% chance of being malignant.Biopsy strongly recommended
+6 = Known biopsy-proven malignancy
+
+Age: age of the patient in years
+
+Shape: shape of the mass; round = 1, oval = 2, lobular = 3, irregular = 4
+
+Margin: mass margin; circumscirbed = 1, microlobulate = 2, obscured = 3, ill-defined = 4, spiculated = 5
+
+Density: mass density; high = 1, isodense = 2, low = 3, fat-contained = 4 (ordinal)
+
+Severity: diganosis; benign = 0, malignant = 1 
+
+Missing Data and Outliers
+
+There is an outlier in BI.RADS. All values should range from 0 to 6. The observation with value 55 appears to be a recording error. I will remove this observation from the dataset. 
+
+```{r}
+mam <- mam[which(mam$BI.RADS<=6),]
+```
+
+
+Since all variables, except age, are categorical, I want to convert them into factor variables.
+
+```{r}
+mam$BI.RADS <- factor(mam$BI.RADS, ordered=TRUE)
+mam$Density <- factor(mam$Density, ordered=TRUE)
+mam$Shape <- factor(mam$Shape, ordered=FALSE)
+mam$Margin <- factor(mam$Margin, ordered=FALSE)
+mam$Severity <- factor(mam$Severity, ordered=FALSE, levels=c(1,0))
+levels(mam$Severity) <- c('malignant', 'benign')
+```
+
+
+Distribution of Data
+```{r}
+a <- ggplot(mam, aes(x=BI.RADS)) + geom_bar()
+b <- ggplot(mam, aes(x=Age)) + geom_histogram(bins=20)
+c <- ggplot(mam, aes(x=Shape)) + geom_bar()  
+d <- ggplot(mam, aes(x=Margin)) + geom_bar() 
+e <- ggplot(mam, aes(x=Density)) + geom_bar() 
+f <- ggplot(mam, aes(x=Severity)) + geom_bar()
+grid.arrange(a,b,c,d,e,f, top='Mammographic Imaging')
+```
+
+All other categorical variables fall within the correct range. Age looks to be of a normal distribution. Here is what the summary of the clean dataset looks like.
+```{r}
+summary(mam)
+```
+
+## Variable Selection
+I want to compare the variables between the two groups: malignant and benign. 
+
+```{r}
+c1 <- ggplot(mam, aes(x = BI.RADS, fill = Severity)) + 
+  geom_bar(position = position_dodge(preserve = "single"))
+c2 <- ggplot(mam, aes(x = Age, fill = Severity)) + geom_density()
+c3 <- ggplot(mam, aes(x = Shape, fill = Severity)) + 
+  geom_bar(position = position_dodge(preserve = "single"))
+c4 <- ggplot(mam, aes(x = Margin, fill = Severity)) + 
+  geom_bar(position = position_dodge(preserve = "single"))
+c5 <- ggplot(mam, aes(x = Density, fill = Severity)) + 
+  geom_bar(position = position_dodge(preserve = "single"))
+grid.arrange(c1,c2,c3,c4,c5, top='Mammographic Imaging')
+```
+It appears that all variables, except Density, are significant variables in predicting Severity.
+
+
+## Model Selection
+
+I have decided to use Logistic Regression, Decision Tree Classification, and k-Nearest Neighbors. 
+
+**Logistic Regression**
+The goal is to have the least false negatives. I will use the backward stepwise method to find the model with the lowest AIC. 
+```{r}
+full_mam_model <- glm(Severity ~ ., mam, family=binomial())
+summary(full_mam_model)
+```
+The variables found to be most significant are Age, Shape, and Margin. 
+
+First, I need to split the data into training and testing sets.
+
+```{r}
+levels(mam$Severity)=c(1,0)
+```
+
+
+```{r}
+set.seed(123)
+split <- mam$Severity %>%
+  createDataPartition(p = .80, list = FALSE)
+train  <- mam[split, ]
+test <- mam[-split, ]
+```
+
+I want to use the training data on the model, train the model using the training data, and run the test data through the model.  
+
+
+```{r}
+train_mam_model <- glm(Severity ~ Age + Shape + Margin, data=train, family=binomial())
+summary(train_mam_model)
+par(mfrow=c(2,2))
+plot(train_mam_model)
+res <- predict(train_mam_model, test, type='response')
+```
+
+We can look compare the actual values and the predicted values in a confusion matrix. The goal is to choose the model with the most accuracy with the greatest recall.
+
+```{r}
+lr_cm <- table(Actual_value=test$Severity, Predicted_value=res>0.5)
+lr_cm
+```
+
+Accuracy and Recall - 50% threshold 
+```{r}
+lr_accuracy <- (lr_cm[[1,1]] + lr_cm[[2,2]]) / sum(lr_cm)
+lr_recall <- lr_cm[[1,1]]/(lr_cm[[1,1]] + lr_cm[[2,1]])
+```
+Using a 50% threshold to predict diagnosis provides a prediction accuracy of 80% and recall of 79%. we want to eliminate the Type II errors. Therefore, I will reduce the threshold. 
+
+Through trial and error, I discovered the largest threshold with the best recall is 6%.
+```{r}
+lr_cm2 <- table(Actual_value=test$Severity, Predicted_value=res>0.06)
+lr_cm2
+```
+Accuracy and Recall - 6% threshold
+```{r}
+lr_accuracy2 <- (lr_cm2[[1,1]] + lr_cm2[[2,2]]) / sum(lr_cm2)
+lr_recall2 <- lr_cm2[[1,1]]/(lr_cm2[[1,1]] + lr_cm2[[2,1]])
+```
+Although the prediction accuracy is only 58%, the 6% threshold provides 100% recall.
+
+**Decision Tree**
+```{r}
+#et.seed(123)
+tree_mam <- rpart(Severity ~ ., train, method = 'class', 
+               minsplit=2, minbucket=1)
+```
+
+```{r}
+fancyRpartPlot(tree_mam)
+```
+Using a Decision Tree model, the variables of most significance are BI.RADS, Shape, Age and Margin.
+```{r}
+pred <- predict(tree_mam, test, type = "class")
+```
+
+
+```{r}
+tree_cm <- table(Actual_value=test$Severity, Predicted_vlaue=pred)
+tree_cm
+```
+Accuracy and Recall
+```{r}
+tree_accuracy <- (tree_cm[[1,1]] + tree_cm[[2,2]]) / sum(tree_cm)
+tree_recall <- tree_cm[[1,1]]/(tree_cm[[1,1]] + tree_cm[[2,1]])
+```
+
+
+**k-Nearest Neighbors**
+```{r}
+train_labels <- mam[split, 6]
+test_labels <-mam[-split, 6]
+```
+```{r}
+knn_mam <- knn(train, test, train_labels, k=29)
+knn_cm <- table(Actual_value=knn_mam, Predicted_value=test_labels)
+knn_cm
+```
+
+
+
+```{r}
+knn_accuracy <- (knn_cm[[1,1]] + knn_cm[[2,2]]) / sum(knn_cm)
+knn_recall <- knn_cm[[1,1]]/(knn_cm[[1,1]] + knn_cm[[2,1]])
+```
+
+**Random Forest**
+Choosing the significant variables
+```{r}
+set.seed(123)
+control <- rfeControl(functions=rfFuncs, method="cv", number=10)
+results <- rfe(mam[,1:5], mam[,6], sizes=c(1:5), rfeControl=control)
+print(results)
+predictors(results)
+plot(results, type=c("g", "o"))
+```
+```{r}
+rf_mam <- randomForest(Severity ~ BI.RADS,data=train)
+```
+
+
+```{r}
+pred_rf = predict(rf_mam, newdata=test[-6])
+rf_cm = table(test[,6], pred_rf)
+rf_cm
+```
+```{r}
+rf_accuracy <- (rf_cm[[1,1]] + rf_cm[[2,2]]) / sum(rf_cm)
+rf_recall <- rf_cm[[1,1]]/(rf_cm[[1,1]] + rf_cm[[2,1]])
+```
+
+
+```{r}
+best_mam <- matrix(c(lr_accuracy,lr_recall,lr_accuracy2, lr_recall2,tree_accuracy,tree_recall,
+                     knn_accuracy, knn_recall, rf_accuracy, rf_recall),ncol=2,byrow=TRUE)
+rownames(best_mam)<-c('Logistic Reg - 50%','Logistic Reg - 6%','Decision Tree','kNN',
+                      'Random Forest')
+colnames(best_mam)<-c('Accuracy','Recall')
+best_mam <- as.table(best_mam)
+best_mam
+```
+
+
+# Biopsy Dataset
+## Cleaning the Data
+```{r}
+str(biop)
+```
+```{r}
+names(biop) <- c('radius','texture', 'perimeter', 'area', 'smoothness', 'diagnosis')
+```
+We have 569 observations with 6 variables that describe the cell nuclei from breast mass biopsies.
+
+radius: the mean of distances from the center of the cell nuclei to the points on its perimeter
+
+texture: the mean texture of the nuclei, described by the spatial arrangement and variation of grey values observed
+
+perimeter: the mean distatnce around the nucluei
+
+area: the mean area of the nuclei
+
+smoothness: the mean of the local variation in radius lengths
+
+diagnosis: the diagnosis of the mass, where 0 = malignant, 1 = benign
+
+Since diagnosis is categorical, I want to convert it into a factor variable.
+```{r}
+biop$diagnosis <- factor(biop$diagnosis, ordered=FALSE)
+levels(biop$diagnosis) <- c('malignant', 'benign')
+```
+
+Distribution of Data
+```{r}
+g <- ggplot(biop, aes(x=radius)) + geom_histogram(bins=20)
+h <- ggplot(biop, aes(x=texture)) + geom_histogram(bins=20)
+i <- ggplot(biop, aes(x=perimeter)) + geom_histogram(bins=20)  
+j <- ggplot(biop, aes(x=area)) + geom_histogram(bins=20) 
+k <- ggplot(biop, aes(x=smoothness)) + geom_histogram(bins=20) 
+l <- ggplot(biop, aes(x=diagnosis)) + geom_bar()
+grid.arrange(g,h,i,j,k,l, top='Fine Needle Aspiration Biopsy')
+```
+
+There is no indications of any outliers in the data. However, all quantitative variables appear to be skewed-left. Here is what the summary of the clean dataset looks like.
+```{r}
+summary(biop)
+```
+## Variable Selection
+
+I want to look at the relationship between radius, perimeter, and area. 
+```{r}
+r <- ggplot(biop, aes(x=radius, y=perimeter, col=diagnosis)) + geom_point()
+r2 <- ggplot(biop, aes(x=radius, y=area, col=diagnosis)) + geom_point()
+r3 <- ggplot(biop, aes(x=perimeter, y=area, col=diagnosis)) + geom_point()
+rnd <- biop$radius*biop$perimeter
+r4 <- ggplot(biop, aes(x=rnd, y=area, col=diagnosis)) + geom_point() + xlab('radius * perimeter')
+grid.arrange(r,r2,r3,r4, top='Fine Needle Aspiration Biopsy')
+```
+```{r}
+cor1 <- cor(biop$radius,biop$perimeter)
+cor2 <- cor(biop$radius,biop$area)
+cor3 <- cor(biop$perimeter,biop$area)
+cor4 <- cor(rnd, biop$area)
+```
+```{r}
+cor_table <- matrix(c(cor1,cor2,cor3,cor4), ncol=1, byrow=TRUE)
+rownames(cor_table)<-c('radius vs perimeter','radius vs area','perimeter vs area',
+                       'radius*perimeter vs area')
+colnames(cor_table)<-c('Correlation')
+cor_table <- as.table(cor_table)
+cor_table
+```
+
+```{r}
+biop_new <- subset(biop, select = c(2,4,5,6))
+```
+I want to look at the correlation between the remaining variables.
+```{r}
+cor(biop_new[-4])
+```
+
+Density and boxplots of the variables.
+```{r}
+d1 <- ggplot(biop_new, aes(x = texture, fill = diagnosis)) + geom_density()
+d2 <- ggplot(biop_new, aes(x = texture, fill = diagnosis)) + geom_boxplot()
+d3 <- ggplot(biop_new, aes(x = area, fill = diagnosis)) + geom_density() 
+d4 <- ggplot(biop_new, aes(x = area, fill = diagnosis)) + geom_boxplot() 
+d5 <- ggplot(biop_new, aes(x = smoothness, fill = diagnosis)) + geom_density()
+d6 <- ggplot(biop_new, aes(x = smoothness, fill = diagnosis)) + geom_boxplot()
+```
+```{r}
+grid.arrange(d1,d2,top='Fine Needle Aspiration Biopsy')
+```
+```{r}
+grid.arrange(d3,d4,top='Fine Needle Aspiration Biopsy')
+```
+```{r}
+grid.arrange(d5,d6,top='Fine Needle Aspiration Biopsy')
+```
+
+```{r}
+wilcox.test(biop$texture ~ biop$diagnosis)
+wilcox.test(biop$area ~ biop$diagnosis)
+wilcox.test(biop$smoothness ~ biop$diagnosis)
+```
+
+All variables appear to be significant in predicting the diagnosis. 
+I want to look at scatter plots and a correlation matrix of the variables. 
+
+Since radius, perimeter, and area are almost perfectly correlated, I want to remove two of them from the dataset. I am choosing to keep area. 
+
+## Model Selection
+**Logistic Regression**
+```{r}
+biop_full_model <- glm(diagnosis ~ ., data=biop_new,family=binomial())
+summary(biop_full_model)
+```
+We can see that all varibles are significant. 
+
+```{r}
+levels(biop_new$diagnosis)=c(0,1)
+```
+
+
+```{r}
+set.seed(123)
+split <- biop_new$diagnosis %>%
+  createDataPartition(p = .80, list = FALSE)
+train  <- biop_new[split, ]
+test <- biop_new[-split, ]
+```
+
+I want to use the training data on the model, train the model using the training data, and run the test data through the model.  
+
+```{r}
+train_biop_model <- glm(diagnosis ~ texture + area + smoothness, data=train,
+                        family=binomial())
+res <- predict(train_biop_model, test, type='response')
+```
+
+We can look compare the actual values and the predicted values in a confusion matrix. 
+```{r}
+lr_cm <- table(Actual_value=test$diagnosis, Predicted_value=res>0.5)
+lr_cm
+```
+Accuracy and recall
+```{r}
+lr_accuracy <- (lr_cm[[1,1]] + lr_cm[[2,2]]) / sum(lr_cm)
+lr_recall <- lr_cm[[1,1]]/(lr_cm[[1,1]] + lr_cm[[2,1]])
+lr_fp <- lr_cm[[1,2]] / sum(lr_cm)
+lr_fn <- lr_cm[[2,1]] / sum(lr_cm)
+```
+
+```{r}
+lr_cm2 <- table(Actual_value=test$diagnosis, Predicted_value=res>0.26)
+lr_cm2
+```
+Accuracy and recall
+```{r}
+lr_accuracy2 <- (lr_cm2[[1,1]] + lr_cm2[[2,2]]) / sum(lr_cm2)
+lr_recall2 <- lr_cm2[[1,1]]/(lr_cm2[[1,1]] + lr_cm2[[2,1]])
+lr_fp2 <- lr_cm2[[1,2]] / sum(lr_cm2)
+lr_fn2 <- lr_cm2[[2,1]] / sum(lr_cm2)
+```
+
+**Decision Tree**
+```{r}
+tree_biop <- rpart(diagnosis ~ ., train,  method = 'class', minsplit=2, minbucket=1)
+```
+
+```{r}
+fancyRpartPlot(tree_biop)
+```
+```{r}
+pred <- predict(tree_biop, test, type = "class")
+```
+
+
+```{r}
+tree_cm <- table(Actual_value=test$diagnosis, Predicted_vlaue=pred)
+tree_cm
+```
+Accuracy and Recall
+```{r}
+tree_accuracy <- (tree_cm[[1,1]] + tree_cm[[2,2]]) / sum(tree_cm)
+tree_recall <- tree_cm[[1,1]]/(tree_cm[[1,1]] + tree_cm[[2,1]])
+```
+**k-Nearest Neighbors**
+```{r}
+train_labels <- biop_new[split, 4]
+test_labels <- biop_new[-split, 4]
+```
+```{r}
+set.seed(123)
+knn_biop <- knn(train, test, train_labels, k=23)
+knn_cm <- table(Actual_value=knn_biop, Predicted_value=test_labels)
+knn_cm
+```
+
+
+
+```{r}
+knn_accuracy <- (knn_cm[[1,1]] + knn_cm[[2,2]]) / sum(knn_cm)
+knn_recall <- knn_cm[[1,1]]/(knn_cm[[1,1]] + knn_cm[[2,1]])
+```
+
+**Random Forest**
+```{r}
+rf_biop <- randomForest(diagnosis ~ .,data=train)
+```
+```{r}
+pred_rf = predict(rf_biop, newdata=test[-4])
+rf_cm = table(test[,4], pred_rf)
+rf_cm
+```
+```{r}
+rf_accuracy <- (rf_cm[[1,1]] + rf_cm[[2,2]]) / sum(rf_cm)
+rf_recall <- rf_cm[[1,1]]/(rf_cm[[1,1]] + rf_cm[[2,1]])
+```
+```{r}
+best_biop <- matrix(c(lr_accuracy, lr_recall, lr_accuracy2, lr_recall2, tree_accuracy,
+                      tree_recall, knn_accuracy, knn_recall, rf_accuracy, rf_recall), 
+                    ncol=2, byrow=TRUE)
+rownames(best_biop)<-c('Logistic Reg - 50%','Logistic Reg - 26%','Decision Tree','kNN','Random Forests')
+colnames(best_biop)<-c('Accuracy','Recall')
+best_biop <- as.table(best_biop)
+best_biop
+```
+
+# Haberman's Dataset
+## Cleaning the Data
+```{r}
+str(hab)
+```
+The dataset contains cases from a study conducted from 1958 and 1970 on the survival of patient's that had surgery for breast cancer. It has 305 observations with four variables: 
+
+age: age of the patient at the time of surgery
+
+year: the year that the surgery was performed
+
+nodes: the number of axillary lymph nodes in which cancer cells are present. An axillary lymph node is a lymph node in the area of the axilla (armpit) to which the cancer has spread.
+
+status: binary categorical variable where 
+1 = the patient survived more than 5 years post-surgery and 
+2 = the patient survived for less than 5 years post-surgery.
+
+As status is a binary categorical varible, I will convert it into factor variable.
+```{r}
+hab$status <- factor(hab$status, ordered=FALSE, levels=c(2,1))
+levels(hab$status) <- c('died', 'survived')
+```
+
+Distribution of Data
+```{r}
+m <- ggplot(hab, aes(x=age)) + geom_histogram(bins=15)
+n <- ggplot(hab, aes(x=year)) + geom_histogram(bins=50)
+o <- ggplot(hab, aes(x=nodes)) + geom_histogram(bins=20)  
+p <- ggplot(hab, aes(x=status)) + geom_bar() 
+grid.arrange(m,n,o,p, top='Haberman\'s Survival')
+```
+The large number of nodes causes some concern. Upon further research, I discovered that the number of lymph nodes depends on one's anatomy and vary between each patient. There do not appear to be any outliers. Age appears to have a normal distribution. Year and nodes are skewed-right. Here is what the summary of the clean dataset looks like.
+
+
+```{r}
+summary(hab)
+```
+## Variable Selection
+I want to compare the variables between the two groups: those who survived and those who did not.
+
+```{r}
+e1 <- ggplot(hab, aes(x = age, fill = status)) + geom_density()
+e2 <- ggplot(hab, aes(x = year, fill = status)) + geom_density()
+e3 <- ggplot(hab, aes(x = nodes, fill = status)) + geom_density()
+e4 <- ggplot(hab, aes(x = age, fill = status)) + geom_boxplot()
+e5 <- ggplot(hab, aes(x = year, fill = status)) + geom_boxplot()
+e6 <- ggplot(hab, aes(x = nodes, fill = status)) + geom_boxplot()
+#grid.arrange(e1,e2,e3)
+```
+```{r}
+grid.arrange(e1,e4, top='Haberman\'s Survival')
+```
+```{r}
+grid.arrange(e2,e5, top='Haberman\'s Survival')
+```
+```{r}
+grid.arrange(e3,e6,top='Haberman\'s Survival')
+```
+It appears that the only significant variable is nodes. As the distribution of the variables are not normal, I will use a Mann-Whitney U Test to verify my claim. 
+```{r}
+wilcox.test(hab$age ~ hab$status)
+wilcox.test(hab$year ~ hab$status)
+wilcox.test(hab$nodes ~ hab$status)
+```
+We can see that nodes is the only significant factor in determining whether a patient will survive longer than five years post-surgery. 
