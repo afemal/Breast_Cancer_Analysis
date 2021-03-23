@@ -39,4 +39,4 @@ By adjusting the decision threshold, I was able to obtain 100% recall using logi
 
 ### Navigation
 * Breast Cancer Analysis: Data prep, EDA, and analysis conducted in R 
-* Paper: Presentation of my findings.
+* Paper - Breast Cancer Analysis: Presentation of my findings.
